@@ -18,17 +18,8 @@ import string
 
 # --- CONFIGURATION ---
 PROJECT_CODE = "24.chdi.01"
-# Path to the list file (if you decide to read from file)
-# overall list file
-#LIST_FILE = f"/home/hmm56/Projects/24.chdi.01/list/24.chdi.01-phase2-02061015.list"
-# small test list
-LIST_FILE = f"/home/hmm56/Projects/24.chdi.01/list/24.chdi.01-15-WILD-F.list" 
-# ABSOLUTE path to the script created above
-# unsure if i will still use this format schene
-WORKER_SCRIPT = "/cm/shared/workstation/code/diffusion/filtered_tractography/dsi_task.py" 
-
 BIGGUS = os.environ["BIGGUS_DISKUS"]
-ARCHIVE_ROOT = Path("/mnt/nclin-comp-pri.dhe.duke.edu/dusom_civm-atlas/24.chdi.01/research")
+ARCHIVE_ROOT = Path(f"/mnt/nclin-comp-pri.dhe.duke.edu/dusom_civm-atlas/{PROJECT_CODE}/research")
 CONNECTOME_CACHE = Path(f"{BIGGUS}/filtered_tracking/connectome_cache")
 DSI_STUDIO_BIN = "/cm/shared/workstation/aux/dsi_studio_2022-12-22/dsi_studio"
 MATLAB_BIN = "matlab"
@@ -131,20 +122,20 @@ def run_both_sides(runno, roi1, roi2, dry_run=False):
     roi2 = int(roi2)
     if not abs(roi1 - roi2) - offset:
         # then we have the same region on both sides, only one run is needed
-        cmd = setup_pipeline(runno, roi1, roi2, dry_run)
+        cmd = setup_pipeline(runno, roi1, roi2, dry_run=dry_run)
         return [cmd]
-    cmd1 = setup_pipeline(runno, roi1, roi2, dry_run)
+    cmd1 = setup_pipeline(runno, roi1, roi2, dry_run=dry_run)
 
     roi1 = roi1+1000 if roi1<1000 else roi1-1000
     roi2 = roi2+1000 if roi2<1000 else roi2-1000
-    cmd2 = setup_pipeline(runno, roi1, roi2, dry_run)
+    cmd2 = setup_pipeline(runno, roi1, roi2, dry_run=dry_run)
     return [cmd1, cmd2]
     
 
 # this handles all logic for creating one filtered track and tdi file
 # filters by roi1, then filters by roi2, then exports to tdi/tdi_color
 # the end result of this will be ONE cmd, to be returned and added to cmds
-def setup_pipeline(runno, roi1, roi2, dry_run=False):
+def setup_pipeline(runno, roi1, roi2, project_code="24.chdi.01", dry_run=False):
     # --- Setup Paths ---
     work_dir = os.path.join(BIGGUS,"filtered_tracking",f"tracking{runno}dsi_studio-work")
     results_dir = os.path.join(BIGGUS,"filtered_tracking",f"tracking{runno}dsi_studio-results")
@@ -227,58 +218,49 @@ def setup_pipeline(runno, roi1, roi2, dry_run=False):
     found_channels = glob.glob(os.path.join(nhdr_dir,f'{name.removesuffix(".nhdr")}_*.nhdr'))
     cmds.append(cmd) if not len(found_channels) > 2 else cmds.append(f"#{cmd}")
 
+    # copy the split channel colors into the SAMBA inputs directory
+    # due to a logical glitch with split-channel colors, must copy into 24.chdi.01_nhdr and VBM-work/clean_inputs
+    # otherwise SAMBA will try to force to split channels to get into clean_inputs
+    # just because 'color' is in the name
+    # any file which has pattern color_*.[nhdr,raw] is a color component\
+
+    project_nhdr_dir = os.path.join(BIGGUS,f'{project_code}_nhdr')
+    SAMBA_work_dir = os.path.join(BIGGUS,f'VBM_24chdi01_chass_symmetric5-work')
+    clean_inputs_dir = os.path.join(SAMBA_work_dir,'clean_inputs')
+    clean_masked_dir = os.path.join(SAMBA_work_dir,'clean_masked')
+    for filepath in glob.glob(os.path.join(nhdr_dir,f'{name.removesuffix(".nhdr")}_*')):
+        fn = os.path.basename(filepath)
+        # put it into the nhdr dir
+        outf = f"{project_nhdr_dir}/{fn}"
+        cmd = f"cp {filepath} {outf}"
+        cmds.append(cmd) if not os.path.exists(outf) else cmds.append(f"#{cmd}")
+
+        # put it into clean_inputs
+        outf = f"{clean_inputs_dir}/{fn}"
+        cmd = f"cp {filepath} {outf}"
+        cmds.append(cmd) if not os.path.exists(outf) else cmds.append(f"#{cmd}")
+
+        # put it into clean_masked
+        # for clean masked(nhdr only) i also need to rename it
+        if filepath.endswith('.nhdr'):
+            outf = f"{clean_masked_dir}/{fn}"
+            outf_name_corrected = f"{clean_masked_dir}/{fn.removesuffix('.nhdr')}_masked.nhdr"
+            # only do the copy if the RENAMED destination file does not exist
+            # otherwise we will make a mess and have both renamed and unrenamed files in clean_masked
+            cmd = f"cp {filepath} {outf}"
+            cmds.append(cmd) if not os.path.exists(outf_name_corrected) else cmds.append(f"#{cmd}")
+            cmd = f"mv {outf} {outf_name_corrected}"
+            cmds.append(cmd) if not os.path.exists(outf_name_corrected) else cmds.append(f"#{cmd}")
+        else:
+            # for the raw files, i do not want to rename their filenames
+            # else i would also need to update data file: field in the nhdr
+            outf = f"{clean_masked_dir}/{fn}"
+            cmd = f"cp {filepath} {outf}"
+            cmds.append(cmd) if not os.path.exists(outf) else cmds.append(f"#{cmd}")
+
     return make_cluster_command(cmds,bash_stub_dir,f"{runno}_filter_and_nrrdify")
 
 
-
-    # split the tdi_color into component channels
-
-
-"""
-# example from varun's code for how to create and run a matlab file on the cluster
-
-        with open(mat_script, 'w') as f:
-            with open(mat_script_template, 'r') as old_f:
-                old = old_f.read()
-            f.write("close all;\n")
-            f.write("clear all;\n")
-            f.write("save_location='{}';\n".format(out_dir))
-            f.write("data_frame_path='{}';\n".format(data_frame_path))
-            f.write("test_criteria={};\n".format(test_criteria))
-            f.write("log_file='{}';\n".format(log_file))
-            f.write("completion_code='{}';\n".format(completion_code))
-            f.write("run_R_analysis='{}';\n".format(run_R_analysis))
-            f.write(old)
-            f.write("exit;")
-
-        cmd = "\"run('{}'); exit;\"".format(mat_script)
-        cmd = "{} -nosplash -nodisplay -nodesktop -r {} -logfile {}".format(self.matlab, cmd, log_file)
-        return cmd
-"""
-"""
-# split the tdi_color file into component channels
-input_package={out_dir}/nhdr;
-cd $split_color_output_dir;
-inc=$out_tdi_color_nhdr;
-n="$(basename $inc)";
-# looking for outputs here
-found_channels=$(find $split_color_output_dir -maxdepth 1 -type f -name "{n%.*}_*nhdr" | wc -l)
-outc="$split_color_output_dir/{n%.*}";
-if [ $found_channels -ge 3 ];then
-    echo "Found $found_channels of output for $n, skipping";
-    continue;
-fi;
-echo "run split channel on $n";
-# Quit was part of code, but finally remembered that'd blind it. quit('force');
-mat_code="i='$inc';o='$outc';image_channel_split(i,o);";
-echo "running $mat_code";
-matlab_run --purpose color_split --dir-work "split_{n%.*}-work" "$mat_code" &
-
-"""
-
-
-#     ARCHIVE_ROOT = Path("/mnt/nclin-comp-pri.dhe.duke.edu/dusom_civm-atlas/24.chdi.01/research")
-#     in_dir = os.path.join(ARCHIVE_ROOT,f"connectome{runno}dsi_studio")
 def prepull_data(runno):    
     print(f"Pulling data for {runno}")
     in_dir = os.path.join(ARCHIVE_ROOT,f"connectome{runno}dsi_studio")
@@ -298,7 +280,40 @@ def prepull_data(runno):
         shutil.copyfile(in_file,out_file) if not os.path.exists(out_file) else print(f"out_file already copied")
 
 
+def load_list_files(ages, project_code="24.chdi.01"):
+    runno_list = []
+    for age in ages:
+        for condition in ['HET','WILD']:
+            for sex in ['M','F']:
+                list_file = f"/home/hmm56/Projects/{project_code}/list/{project_code}-{age}-{condition}-{sex}.list"
+                with open(list_file,'r') as f:
+                    new_runnos = f.read().strip().split('\n')
+                    runno_list.extend(new_runnos)
+    return runno_list
 
+def setup_channel_comma_list_for_samba_headfile(roi_pair_list):
+    offset = 1000
+    l = []
+    for roi in roi_pair_list:
+        roi1 = roi[0]
+        roi2 = roi[1]
+        # excluding tdi uncolored because it crashes samba...unsure why
+        #l.append(f'{roi1}_{roi2}_tdi')
+        for c in ['red','green','blue']:
+            l.append(f'{roi1}_{roi2}_tdi_color_{c}')
+        # other side
+        if not abs(roi1 - roi2) - offset:
+            # other side not necessary
+            continue
+        roi1 = roi1+1000 if roi1<1000 else roi1-1000
+        roi2 = roi2+1000 if roi2<1000 else roi2-1000
+        l.append(f'{roi1}_{roi2}_tdi')
+        for c in ['red','green','blue']:
+            l.append(f'{roi1}_{roi2}_tdi_color_{c}')
+    channel_comma_list = ','.join(l)
+    print(f'\t\tchannel_comma_list')
+    print(f'channel_comma_list={channel_comma_list}')
+    return channel_comma_list
 
 def main():
     parser = argparse.ArgumentParser(description="Create connectome-filtered TDI_color files for SAMBA inputs")
@@ -307,23 +322,34 @@ def main():
 
     # find relevant list file
     project_code = "24.chdi.01"
-    age = 15
-    list_file = f"/b/ProjectSpace/hmm56/Projects/{project_code}/list/{project_code}-{age}.list"
-    # short list for testing 
-    runno_list = ["S70132NLSAM", "S70133NLSAM", "S70135NLSAM", "S70137NLSAM", "S70139NLSAM"]
-    #roi_pair_list = [(111,1111), (15, 1015), (15, 1009), (15, 1156), (47,51), (47, 1005)]
-    #runno_list = ["S70139NLSAM"]
-    roi_pair_list = [(111,1111), (15, 1015)]
+    ages = [2,6,10,15]
+    runno_list = load_list_files(ages, project_code)
+    print(runno_list)
 
+
+    # short list for testing 
+    #runno_list = ["S70132NLSAM", "S70133NLSAM", "S70135NLSAM", "S70137NLSAM", "S70139NLSAM"]
+    #roi_pair_list = [(111,1111), (15, 1015), (15, 1009), (15, 1156), (47,51), (47, 1005)]
+    # testing to get through the full pipeline
+
+    # cartesian product
+    # these roi pairs decided as the full blue list from Kathryn's feb 2 2026 email for 15 MOS and 47 STD
+    l1 = [(15,x) for x in [7,14,9,17,47,156,157,1005,1006,1007,1009,1014,1015,1156,1157]]
+    l2 = [(47,x) for x in [7,8,9,15,36,66,67,74,77,78,168,1036,1066,1077,1078]]
+    roi_pair_list = l1 + l2
+
+    setup_channel_comma_list_for_samba_headfile(roi_pair_list)
 
     cmds = []
+    # pre-create the tractography files to ensure they will be present for the rest of the pipeline
+    # this is an immutable input that will always be used, much like the fib or label file
     for runno in runno_list:
         if not runno.startswith(("S","N")): continue
-        print(runno)
         prepull_data(runno)
         cmd = precompute_tractography(runno)
         cmds.append(cmd)
     cluster_run_cmds(cmds, args)
+    #import pdb;pdb.set_trace()
 
     cmds = []
     for runno in runno_list:
