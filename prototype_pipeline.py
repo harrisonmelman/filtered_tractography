@@ -17,9 +17,7 @@ import string
 # try again...from scratch
 
 # --- CONFIGURATION ---
-PROJECT_CODE = "24.chdi.01"
 BIGGUS = os.environ["BIGGUS_DISKUS"]
-ARCHIVE_ROOT = Path(f"/mnt/nclin-comp-pri.dhe.duke.edu/dusom_civm-atlas/{PROJECT_CODE}/research")
 CONNECTOME_CACHE = Path(f"{BIGGUS}/filtered_tracking/connectome_cache")
 DSI_STUDIO_BIN = "/cm/shared/workstation/aux/dsi_studio_2022-12-22/dsi_studio"
 MATLAB_BIN = "matlab"
@@ -80,7 +78,9 @@ def make_cluster_command(cmds, out_dir, job_name, memory="40G"):
     return "sbatch --mem={} --output={} {}".format(memory, slurm_out_file, bash_wrapper)
 
 
-def precompute_tractography(runno):
+# all optional arguments have defaults set to pipeline parameters
+# you are free to override
+def precompute_tractography(runno, seed_count=2000000, fa_thresh_pct=10, step_size=0.01, smoothing=0.01, min_length=0.5, max_length=200, turn_angle=45):
     # --- Setup Paths ---
     work_dir = os.path.join(BIGGUS,"filtered_tracking",f"tracking{runno}dsi_studio-work")
     bash_stub_dir = os.path.join(work_dir,'bash_stub')
@@ -94,48 +94,64 @@ def precompute_tractography(runno):
         
     log_file = os.path.join(work_dir,f"pipe_log-{datetime.datetime.now().strftime('%Y%m%d%H%M')}.log")
 
-    fa_thresh = "0.1"
-    thresh_file = os.path.join(in_dir,"threshold_at_10pct_nqa.txt")
+    thresh_file = os.path.join(in_dir,f"{runno}_threshold_at_{fa_thresh_pct}pct_nqa.txt")
     if os.path.exists(thresh_file):
         with open(thresh_file, 'r') as f:
-            fa_thresh = f.read().strip()
+            fa_thresh_pct = f.read().strip()
+    else:
+        # then we need to calculate threshold ourself
+        # do not worry about parallel here, as only doing a couple
+        import nibabel as nib
+        import numpy as np
+        img = os.path.join(in_dir,f"nii4D_{runno}.src.gqi.0.9.fib.nqa.nii.gz")
+        data = nib.load(img).get_fdata()
+        data=data[data!=0]
+        data.sort()
+        fa_thresh_pct=data[round((fa_thresh_pct/100)*len(data))]
+        with open(thresh_file,'w') as f:
+            print(fa_thresh_pct, file=f)
 
     full_trk_file = os.path.join(work_dir,f"nii4D_{runno}.src.gqi.0.9.fib.2000K.tt.gz")
             
     if not os.path.exists(full_trk_file):
         cmd = (
             f"{DSI_STUDIO_BIN} --action=trk --source={fib_file} "+
-            f"--output={full_trk_file} --fiber_count=2000000 "+
-            f"--fa_threshold={fa_thresh} --step_size=0.01 --threshold_index=qa "+
-            "--smoothing=0.01 --min_length=0.5 --thread_count=16 "+
-            "--method=0 --turning_angle=45 --max_length=200.0"
+            f"--output={full_trk_file} --fiber_count={seed_count} "+
+            f"--fa_threshold={fa_thresh_pct} --step_size={step_size} --threshold_index=qa "+
+            f"--smoothing={smoothing} --min_length={min_length:.1f} --thread_count=16 "+
+            f"--method=0 --turning_angle={turn_angle} --max_length={max_length:.1f}"
         )
+        
+        
         return make_cluster_command(cmd,bash_stub_dir,f"{runno}_tracking")
     else:
         print(f"{full_trk_file} already exists.")
         return None
 
 
-def run_both_sides(runno, roi1, roi2, dry_run=False):
+def run_both_sides(runno, roi1, roi2, dry_run=False, run_both_sides_override=False, skip_SAMBA_copy=False):
     offset = 1000
     roi1 = int(roi1)
     roi2 = int(roi2)
     if not abs(roi1 - roi2) - offset:
         # then we have the same region on both sides, only one run is needed
-        cmd = setup_pipeline(runno, roi1, roi2, dry_run=dry_run)
+        cmd = setup_pipeline(runno, roi1, roi2, dry_run=dry_run, skip_SAMBA_copy=skip_SAMBA_copy)
         return [cmd]
-    cmd1 = setup_pipeline(runno, roi1, roi2, dry_run=dry_run)
+    cmd1 = setup_pipeline(runno, roi1, roi2, dry_run=dry_run, skip_SAMBA_copy=skip_SAMBA_copy)
+
+    if run_both_sides_override:
+        return [cmd1]
 
     roi1 = roi1+1000 if roi1<1000 else roi1-1000
     roi2 = roi2+1000 if roi2<1000 else roi2-1000
-    cmd2 = setup_pipeline(runno, roi1, roi2, dry_run=dry_run)
+    cmd2 = setup_pipeline(runno, roi1, roi2, dry_run=dry_run, skip_SAMBA_copy=skip_SAMBA_copy)
     return [cmd1, cmd2]
     
 
 # this handles all logic for creating one filtered track and tdi file
 # filters by roi1, then filters by roi2, then exports to tdi/tdi_color
 # the end result of this will be ONE cmd, to be returned and added to cmds
-def setup_pipeline(runno, roi1, roi2, project_code="24.chdi.01", dry_run=False):
+def setup_pipeline(runno, roi1, roi2, project_code="24.chdi.01", dry_run=False, skip_SAMBA_copy=False):
     # --- Setup Paths ---
     work_dir = os.path.join(BIGGUS,"filtered_tracking",f"tracking{runno}dsi_studio-work")
     results_dir = os.path.join(BIGGUS,"filtered_tracking",f"tracking{runno}dsi_studio-results")
@@ -191,6 +207,10 @@ def setup_pipeline(runno, roi1, roi2, project_code="24.chdi.01", dry_run=False):
         new_filename = f"../{new_filename}.{contrast}.nii.gz"
         cmd = f'sed -i "s|data file.*|data file: {new_filename}|" {out_nhdr}'
         cmds.append(cmd)
+
+
+    if skip_SAMBA_copy:
+        return make_cluster_command(cmds,bash_stub_dir,f"{runno}_filter_and_nrrdify")
 
     # split tdi_color using matlab
     timestamp = "_".join(str(time.time()).split("."))
@@ -261,14 +281,16 @@ def setup_pipeline(runno, roi1, roi2, project_code="24.chdi.01", dry_run=False):
     return make_cluster_command(cmds,bash_stub_dir,f"{runno}_filter_and_nrrdify")
 
 
-def prepull_data(runno):    
+def prepull_data(project_code,runno):    
     print(f"Pulling data for {runno}")
+    ARCHIVE_ROOT = Path(f"/mnt/nclin-comp-pri.dhe.duke.edu/dusom_civm-atlas/{project_code}/research")
     in_dir = os.path.join(ARCHIVE_ROOT,f"connectome{runno}dsi_studio")
     fib_file = os.path.join(in_dir,f"nii4D_{runno}.src.gqi.0.9.fib.gz")
     label_file = os.path.join(in_dir,"labels","RCCF",f"{runno}_RCCF_labels.nii.gz")
     tdi_nhdr = os.path.join(in_dir,'nhdr',f"{runno}_tdi.nhdr")
     tdi_color_nhdr = os.path.join(in_dir,'nhdr',f"{runno}_tdi_color.nhdr")
-    files_to_copy = [fib_file, label_file, tdi_nhdr, tdi_color_nhdr]
+    qa_nii = os.path.join(in_dir,f"nii4D_{runno}.src.gqi.0.9.fib.nqa.nii.gz")
+    files_to_copy = [fib_file, label_file, tdi_nhdr, tdi_color_nhdr, qa_nii]
 
     out_dir = CONNECTOME_CACHE
     os.makedirs(out_dir,exist_ok=True) if not os.path.exists(out_dir) else print(f"{out_dir} already exists")
@@ -279,6 +301,12 @@ def prepull_data(runno):
         out_file = os.path.join(out_dir,fn)
         shutil.copyfile(in_file,out_file) if not os.path.exists(out_file) else print(f"out_file already copied")
 
+    # also copy pct threshold file, but it must bee renamed bc no mention of runno in its file name 
+    in_file = os.path.join(in_dir,'threshold_at_10pct_nqa.txt')
+    fn = os.path.basename(in_file)
+    fn = f"{runno}_{fn}"
+    out_file = os.path.join(out_dir,fn)
+    shutil.copyfile(in_file,out_file) if not os.path.exists(out_file) else print(f"out_file already copied")
 
 def load_list_files(ages, project_code="24.chdi.01"):
     runno_list = []
@@ -315,46 +343,71 @@ def setup_channel_comma_list_for_samba_headfile(roi_pair_list):
     print(f'channel_comma_list={channel_comma_list}')
     return channel_comma_list
 
+def tuple_type(s):
+    s = s.strip("()")
+    try:
+        x,y = map(int,s.split(","))
+        return (x,y)
+    except ValueError:
+        argparse.ArgumentTypeError(f"Expected format (x,y), but got: {s}")
+
+
 def main():
     parser = argparse.ArgumentParser(description="Create connectome-filtered TDI_color files for SAMBA inputs")
     parser.add_argument("--dry-run", action="store_true", help="Print sbatch commands without submitting")
+    parser.add_argument("--runno_list","-r",nargs="*",type=str,help='pass a list of runnos to operate on, separated by spaces')
+    parser.add_argument("--project_code","-p",type=str)
+    parser.add_argument("--roi_pair_list", nargs="+",type=tuple_type,help='Pass a list of tuples formatted as (x,y)')
+    parser.add_argument("--one_side_only",action="store_true",help="forces only calculation of asked for side, will not flip and operate")
+    # tractography parameters
+    parser.add_argument("--seed_count",type=int,default=2000000)
+    parser.add_argument("--fa_thresh_pct",type=int,default=10)
+    parser.add_argument("--step_size",type=float,default=0.01)
+    parser.add_argument("--smoothing",type=float,default=0.01)
+    parser.add_argument("--min_length",type=float,default=0.5)
+    parser.add_argument("--max_length",type=float,default=200)
+    parser.add_argument("--turn_angle",type=int,default=45)
     args = parser.parse_args()
-
     # find relevant list file
-    project_code = "24.chdi.01"
-    ages = [2,6,10,15]
-    runno_list = load_list_files(ages, project_code)
-    print(runno_list)
+    if not args.project_code:
+        project_code = "24.chdi.01"
+        ages = [2,6,10,15]
+    if not args.runno_list:
+       args.runno_list = load_list_files(ages, project_code)
+    print(args.runno_list)
+    
 
 
     # short list for testing 
-    #runno_list = ["S70132NLSAM", "S70133NLSAM", "S70135NLSAM", "S70137NLSAM", "S70139NLSAM"]
+    #args.runno_list = ["S70132NLSAM", "S70133NLSAM", "S70135NLSAM", "S70137NLSAM", "S70139NLSAM"]
     #roi_pair_list = [(111,1111), (15, 1015), (15, 1009), (15, 1156), (47,51), (47, 1005)]
     # testing to get through the full pipeline
 
     # cartesian product
     # these roi pairs decided as the full blue list from Kathryn's feb 2 2026 email for 15 MOS and 47 STD
-    l1 = [(15,x) for x in [7,14,9,17,47,156,157,1005,1006,1007,1009,1014,1015,1156,1157]]
-    l2 = [(47,x) for x in [7,8,9,15,36,66,67,74,77,78,168,1036,1066,1077,1078]]
-    roi_pair_list = l1 + l2
-
-    setup_channel_comma_list_for_samba_headfile(roi_pair_list)
+    if not args.roi_pair_list:
+        l1 = [(15,x) for x in [7,14,9,17,47,156,157,1005,1006,1007,1009,1014,1015,1156,1157]]
+        l2 = [(47,x) for x in [7,8,9,15,36,66,67,74,77,78,168,1036,1066,1077,1078]]
+        args.roi_pair_list = l1 + l2
+    setup_channel_comma_list_for_samba_headfile(args.roi_pair_list)
 
     cmds = []
     # pre-create the tractography files to ensure they will be present for the rest of the pipeline
     # this is an immutable input that will always be used, much like the fib or label file
-    for runno in runno_list:
+    for runno in args.runno_list:
         if not runno.startswith(("S","N")): continue
-        prepull_data(runno)
-        cmd = precompute_tractography(runno)
+        prepull_data(args.project_code,runno)
+        # this needs to be updated to pass all arguments
+        # seed_count=2000000, fa_thresh_pct=0.1, step_size=0.01, smoothing=0.01, min_length=0.5, max_length=200, turn_angle=45
+        cmd = precompute_tractography(runno, seed_count=args.seed_count,fa_thresh_pct=args.fa_thresh_pct,step_size=args.step_size,smoothing=args.smoothing,min_length=args.min_length,max_length=args.max_length,turn_angle=args.turn_angle)
         cmds.append(cmd)
     cluster_run_cmds(cmds, args)
     #import pdb;pdb.set_trace()
 
     cmds = []
-    for runno in runno_list:
-        for roi in roi_pair_list:
-            new_cmds = run_both_sides(runno, roi[0], roi[1], args.dry_run)
+    for runno in args.runno_list:
+        for roi in args.roi_pair_list:
+            new_cmds = run_both_sides(runno, roi[0], roi[1], args.dry_run, args.one_side_only)
             # use extend instead of append, as run_both_sides* will return two cmds to run 
             cmds.extend(new_cmds)
     cluster_run_cmds(cmds, args)
