@@ -80,9 +80,9 @@ def make_cluster_command(cmds, out_dir, job_name, memory="40G"):
 
 # all optional arguments have defaults set to pipeline parameters
 # you are free to override
-def precompute_tractography(runno, seed_count=2000000, fa_thresh_pct=10, step_size=0.01, smoothing=0.01, min_length=0.5, max_length=200, turn_angle=45):
+def precompute_tractography(runno, seed_count=2000000, fa_thresh_pct=10, step_size=0.01, smoothing=0.01, min_length=0.5, max_length=200, turn_angle=45, name_tag=""):
     # --- Setup Paths ---
-    work_dir = os.path.join(BIGGUS,"filtered_tracking",f"tracking{runno}dsi_studio-work")
+    work_dir = os.path.join(BIGGUS,"filtered_tracking",f"tracking{runno}dsi_studio{name_tag}-work")
     bash_stub_dir = os.path.join(work_dir,'bash_stub')
     os.makedirs(work_dir,exist_ok=True) if not os.path.exists(work_dir) else print(f"{work_dir} already exists")
     os.makedirs(bash_stub_dir,exist_ok=True) if not os.path.exists(bash_stub_dir) else print(f"{bash_stub_dir} already exists")
@@ -94,6 +94,9 @@ def precompute_tractography(runno, seed_count=2000000, fa_thresh_pct=10, step_si
         
     log_file = os.path.join(work_dir,f"pipe_log-{datetime.datetime.now().strftime('%Y%m%d%H%M')}.log")
 
+    # VARUN TODO: naming convention for these files for your pipeline? They are necessary
+    # OR we add the logic into this pipeline to recalculate. would be copied from yours 
+    # OR OR we can adjust the argument so you can directly pass the computed histogram value instead of the percentage
     thresh_file = os.path.join(in_dir,f"{runno}_threshold_at_{fa_thresh_pct}pct_nqa.txt")
     if os.path.exists(thresh_file):
         with open(thresh_file, 'r') as f:
@@ -129,32 +132,32 @@ def precompute_tractography(runno, seed_count=2000000, fa_thresh_pct=10, step_si
         return None
 
 
-def run_both_sides(runno, roi1, roi2, dry_run=False, run_both_sides_override=False, skip_SAMBA_copy=False):
+def run_both_sides(runno, roi1, roi2, dry_run=False, run_both_sides_override=False, skip_SAMBA_copy=False, name_tag=""):
     offset = 1000
     roi1 = int(roi1)
     roi2 = int(roi2)
     if not abs(roi1 - roi2) - offset:
         # then we have the same region on both sides, only one run is needed
-        cmd = setup_pipeline(runno, roi1, roi2, dry_run=dry_run, skip_SAMBA_copy=skip_SAMBA_copy)
+        cmd = setup_pipeline(runno, roi1, roi2, dry_run=dry_run, skip_SAMBA_copy=skip_SAMBA_copy, name_tag=name_tag)
         return [cmd]
-    cmd1 = setup_pipeline(runno, roi1, roi2, dry_run=dry_run, skip_SAMBA_copy=skip_SAMBA_copy)
+    cmd1 = setup_pipeline(runno, roi1, roi2, dry_run=dry_run, skip_SAMBA_copy=skip_SAMBA_copy, name_tag=name_tag)
 
     if run_both_sides_override:
         return [cmd1]
 
     roi1 = roi1+1000 if roi1<1000 else roi1-1000
     roi2 = roi2+1000 if roi2<1000 else roi2-1000
-    cmd2 = setup_pipeline(runno, roi1, roi2, dry_run=dry_run, skip_SAMBA_copy=skip_SAMBA_copy)
+    cmd2 = setup_pipeline(runno, roi1, roi2, dry_run=dry_run, skip_SAMBA_copy=skip_SAMBA_copy, name_tag=name_tag)
     return [cmd1, cmd2]
     
 
 # this handles all logic for creating one filtered track and tdi file
 # filters by roi1, then filters by roi2, then exports to tdi/tdi_color
 # the end result of this will be ONE cmd, to be returned and added to cmds
-def setup_pipeline(runno, roi1, roi2, project_code="24.chdi.01", dry_run=False, skip_SAMBA_copy=False):
+def setup_pipeline(runno, roi1, roi2, project_code="24.chdi.01", dry_run=False, skip_SAMBA_copy=False, name_tag=""):
     # --- Setup Paths ---
-    work_dir = os.path.join(BIGGUS,"filtered_tracking",f"tracking{runno}dsi_studio-work")
-    results_dir = os.path.join(BIGGUS,"filtered_tracking",f"tracking{runno}dsi_studio-results")
+    work_dir = os.path.join(BIGGUS,"filtered_tracking",f"tracking{runno}dsi_studio{name_tag}-work")
+    results_dir = os.path.join(BIGGUS,"filtered_tracking",f"tracking{runno}dsi_studio{name_tag}-results")
     results_nhdr_dir = os.path.join(results_dir, 'nhdr')
     bash_stub_dir = os.path.join(work_dir,'bash_stub')
     os.makedirs(work_dir,exist_ok=True) if not os.path.exists(work_dir) else print(f"{work_dir} already exists")
@@ -200,7 +203,7 @@ def setup_pipeline(runno, roi1, roi2, project_code="24.chdi.01", dry_run=False, 
 
     for contrast in ["tdi","tdi_color"]:
         nhdr_template =  f"{CONNECTOME_CACHE}/{runno}_{contrast}.nhdr"
-        out_nhdr = f"{results_dir}/nhdr/{runno}_{roi1}_{roi2}_{contrast}.nhdr"
+        out_nhdr = f"{results_dir}/nhdr/{runno}_{roi1}_{roi2}_{contrast}{name_tag}.nhdr"
         cmd = f"cp {nhdr_template} {out_nhdr}"
         cmds.append(cmd) if not os.path.exists(out_nhdr) else cmds.append(f"#{cmd}")
         new_filename = os.path.basename(out_finally)
@@ -367,6 +370,7 @@ def main():
     parser.add_argument("--min_length",type=float,default=0.5)
     parser.add_argument("--max_length",type=float,default=200)
     parser.add_argument("--turn_angle",type=int,default=45)
+    parser.add_argument("--name_tag",type=str,default="")
     args = parser.parse_args()
     # find relevant list file
     if not args.project_code:
@@ -376,6 +380,9 @@ def main():
        args.runno_list = load_list_files(ages, project_code)
     print(args.runno_list)
     
+    if args.name_tag:
+        # if a name tag was give, add a dash to the beginning of it, for filepath generation ease later oin
+        args.name_tag = f"-{args.name_tag}"
 
 
     # short list for testing 
@@ -407,7 +414,7 @@ def main():
     cmds = []
     for runno in args.runno_list:
         for roi in args.roi_pair_list:
-            new_cmds = run_both_sides(runno, roi[0], roi[1], args.dry_run, args.one_side_only)
+            new_cmds = run_both_sides(runno, roi[0], roi[1], args.dry_run, args.one_side_only, args.name_tag)
             # use extend instead of append, as run_both_sides* will return two cmds to run 
             cmds.extend(new_cmds)
     cluster_run_cmds(cmds, args)
