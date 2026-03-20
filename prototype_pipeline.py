@@ -311,6 +311,13 @@ def prepull_data(project_code,runno):
     out_file = os.path.join(out_dir,fn)
     shutil.copyfile(in_file,out_file) if not os.path.exists(out_file) else print(f"out_file already copied")
 
+
+def load_list_file(list_file):
+    with open(list_file,'r') as f:
+        return f.read().strip().split('\n')
+
+
+# this function is quite specialized to the 24.chdi.01 project structure
 def load_list_files(ages, project_code="24.chdi.01"):
     runno_list = []
     for age in ages:
@@ -318,10 +325,10 @@ def load_list_files(ages, project_code="24.chdi.01"):
             for sex in ['M','F']:
                 homedir=os.environ["HOME"]
                 list_file = f"{homedir}/Projects/{project_code}/list/{project_code}-{age}-{condition}-{sex}.list"
-                with open(list_file,'r') as f:
-                    new_runnos = f.read().strip().split('\n')
-                    runno_list.extend(new_runnos)
+                new_runnos = load_list_file(list_file)
+                runno_list.extend(new_runnos)
     return runno_list
+
 
 def setup_channel_comma_list_for_samba_headfile(roi_tuple_list):
     print("SAMBA headfile helper is not set up for n-ROIs. Sorry")
@@ -379,8 +386,18 @@ def main():
     if not args.project_code:
         project_code = "24.chdi.01"
         ages = [2,6,10,15]
-    if not args.runno_list:
+    if not args.runno_list and project_code=="24.chdi.01":
        args.runno_list = load_list_files(ages, project_code)
+    if args.runno_list:
+        final_runnos = []
+        for item in args.runno_list:
+            file_path = Path(item)
+            if file_path.is_file():
+                final_runnos.extend(load_list_file(file_path))
+            else:
+                final_runnos.append(item)
+        args.runno_list = final_runnos
+
     print(args.runno_list)
     
     if args.name_tag:
