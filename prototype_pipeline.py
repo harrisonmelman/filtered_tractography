@@ -125,7 +125,6 @@ def precompute_tractography(runno, seed_count=2000000, fa_thresh_pct=10, step_si
             f"--method=0 --turning_angle={turn_angle} --max_length={max_length:.1f}"
         )
         
-        
         return make_cluster_command(cmd,bash_stub_dir,f"{runno}_tracking")
     else:
         print(f"{full_trk_file} already exists.")
@@ -406,15 +405,15 @@ def main():
         prepull_data(args.project_code,runno)
         # this needs to be updated to pass all arguments
         # seed_count=2000000, fa_thresh_pct=0.1, step_size=0.01, smoothing=0.01, min_length=0.5, max_length=200, turn_angle=45
-        cmd = precompute_tractography(runno, seed_count=args.seed_count,fa_thresh_pct=args.fa_thresh_pct,step_size=args.step_size,smoothing=args.smoothing,min_length=args.min_length,max_length=args.max_length,turn_angle=args.turn_angle)
+
+        cmd = precompute_tractography(runno, seed_count=args.seed_count,fa_thresh_pct=args.fa_thresh_pct,step_size=args.step_size,smoothing=args.smoothing,min_length=args.min_length,max_length=args.max_length,turn_angle=args.turn_angle, name_tag=args.name_tag)
         cmds.append(cmd)
     cluster_run_cmds(cmds, args)
     #import pdb;pdb.set_trace()
-
     cmds = []
     for runno in args.runno_list:
         for roi in args.roi_pair_list:
-            new_cmds = run_both_sides(runno, roi[0], roi[1], args.dry_run, args.one_side_only, args.name_tag)
+            new_cmds = run_both_sides(runno, roi[0], roi[1], args.dry_run, run_both_sides_override=args.one_side_only, skip_SAMBA_copy=True, name_tag=args.name_tag)
             # use extend instead of append, as run_both_sides* will return two cmds to run 
             cmds.extend(new_cmds)
     cluster_run_cmds(cmds, args)
