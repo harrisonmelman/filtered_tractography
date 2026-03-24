@@ -89,14 +89,12 @@ def precompute_tractography(runno, seed_count=2000000, fa_thresh_pct=10, step_si
     
     # Input paths
     in_dir = CONNECTOME_CACHE
-    fib_file = os.path.join(in_dir,f"nii4D_{runno}.src.gqi.0.9.fib.gz")
+    fib_file = glob.glob(os.path.join(in_dir,f"nii4D_{runno}*.fib.gz"))[0]
+    # unused in this function
     label_file = os.path.join(in_dir,"labels","RCCF",f"{runno}_RCCF_labels.nii.gz")
         
     log_file = os.path.join(work_dir,f"pipe_log-{datetime.datetime.now().strftime('%Y%m%d%H%M')}.log")
 
-    # VARUN TODO: naming convention for these files for your pipeline? They are necessary
-    # OR we add the logic into this pipeline to recalculate. would be copied from yours 
-    # OR OR we can adjust the argument so you can directly pass the computed histogram value instead of the percentage
     thresh_file = os.path.join(in_dir,f"{runno}_threshold_at_{fa_thresh_pct}pct_nqa.txt")
     if os.path.exists(thresh_file):
         with open(thresh_file, 'r') as f:
@@ -106,7 +104,7 @@ def precompute_tractography(runno, seed_count=2000000, fa_thresh_pct=10, step_si
         # do not worry about parallel here, as only doing a couple
         import nibabel as nib
         import numpy as np
-        img = os.path.join(in_dir,f"nii4D_{runno}.src.gqi.0.9.fib.nqa.nii.gz")
+        img = glob.glob(os.path.join(in_dir,f"nii4D_{runno}*.nqa.nii.gz"))[0]
         data = nib.load(img).get_fdata()
         data=data[data!=0]
         data.sort()
@@ -168,7 +166,7 @@ def setup_pipeline(runno, roi_tuple, project_code="24.chdi.01", dry_run=False, s
     
     # Input paths
     in_dir = CONNECTOME_CACHE
-    fib_file = os.path.join(in_dir,f"nii4D_{runno}.src.gqi.0.9.fib.gz")
+    fib_file = glob.glob(os.path.join(in_dir,f"nii4D_{runno}*.fib.gz"))[0]
     label_file = os.path.join(in_dir,f"{runno}_RCCF_labels.nii.gz")
     full_trk_file = os.path.join(work_dir,f"nii4D_{runno}.src.gqi.0.9.fib.2000K.tt.gz")
 
@@ -284,15 +282,24 @@ def setup_pipeline(runno, roi_tuple, project_code="24.chdi.01", dry_run=False, s
     return make_cluster_command(cmds,bash_stub_dir,f"{runno}_filter_and_nrrdify")
 
 
-def prepull_data(project_code,runno):    
+# TODO: this is all too baked into assumptions
+# use glob/pa3ttern matching to find your input files. 
+def prepull_data(project_code,runno,archive_suffix=""):
     print(f"Pulling data for {runno}")
     ARCHIVE_ROOT = Path(f"/mnt/nclin-comp-pri.dhe.duke.edu/dusom_civm-atlas/{project_code}/research")
-    in_dir = os.path.join(ARCHIVE_ROOT,f"connectome{runno}dsi_studio")
-    fib_file = os.path.join(in_dir,f"nii4D_{runno}.src.gqi.0.9.fib.gz")
+    in_dir = os.path.join(ARCHIVE_ROOT,f"connectome{runno}dsi_studio{archive_suffix}")
+    # what do i do if I find more than one? Am I likely to have that happen? Do I even care? Not sure. 
+    fib_files = glob.glob(os.path.join(in_dir,f"nii4D_{runno}*.fib.gz"))
+    if len(fib_files) != 1:
+        print(f"found {len(fib_files)} fib files for {runno}. skipping")
+        return None
+    fib_file = fib_files[0]
+    qa_niis = glob.glob(os.path.join(in_dir,f"nii4D_{runno}*.nqa.nii.gz"))
+    qa_nii = qa_niis[0] if len(qa_niis) >= 1 else None
+    # TODO: label TYPE (gaj projects needs WHS labels)
     label_file = os.path.join(in_dir,"labels","RCCF",f"{runno}_RCCF_labels.nii.gz")
     tdi_nhdr = os.path.join(in_dir,'nhdr',f"{runno}_tdi.nhdr")
     tdi_color_nhdr = os.path.join(in_dir,'nhdr',f"{runno}_tdi_color.nhdr")
-    qa_nii = os.path.join(in_dir,f"nii4D_{runno}.src.gqi.0.9.fib.nqa.nii.gz")
     files_to_copy = [fib_file, label_file, tdi_nhdr, tdi_color_nhdr, qa_nii]
 
     out_dir = CONNECTOME_CACHE
@@ -369,6 +376,8 @@ def main():
     parser.add_argument("--dry-run", action="store_true", help="Print sbatch commands without submitting")
     parser.add_argument("--runno_list","-r",nargs="*",type=str,help='The path to a list file, OR a list of runnos to operate on, separated by spaces')
     parser.add_argument("--project_code","-p",type=str)
+    parser.add_argument("--label_type","-l",type=str,default="RCCF")
+    parser.add_argument("--archive_suffix", type=str,default="")
     parser.add_argument("--roi_tuple_list", nargs="+",type=tuple_type,help='Pass a list of tuples formatted as (x,y)')
     parser.add_argument("--one_side_only",action="store_true",help="forces only calculation of asked for side, will not flip and operate",default=False)
     parser.add_argument("--dry_run",action="store_true",help="will only print the commands to run instead of running",default=False)
@@ -424,7 +433,7 @@ def main():
     # this is an immutable input that will always be used, much like the fib or label file
     for runno in args.runno_list:
         if not runno.startswith(("S","N")): continue
-        prepull_data(args.project_code,runno)
+        prepull_data(args.project_code,runno,args.archive_suffix)
         cmd = precompute_tractography(runno, seed_count=args.seed_count,fa_thresh_pct=args.fa_thresh_pct,step_size=args.step_size,smoothing=args.smoothing,min_length=args.min_length,max_length=args.max_length,turn_angle=args.turn_angle, name_tag=args.name_tag)
         cmds.append(cmd)
     cluster_run_cmds(cmds, args)
