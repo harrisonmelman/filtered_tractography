@@ -215,17 +215,15 @@ def setup_pipeline(runno, roi_tuple, project_code="24.chdi.01", dry_run=False, s
     
     # split tdi_color using matlab
     timestamp = "_".join(str(time.time()).split("."))
-    log_file = "{}/tdi_color_split_{}.log".format(bash_stub_dir, timestamp)
     mat_script = "{}/run_from_python_{}.m".format(bash_stub_dir, timestamp)
     Path(mat_script).touch()
-    Path(log_file).touch()
-    completion_code = ''.join(random.choices(string.ascii_uppercase + string.digits, k=10))
 
 
 
     # split the tdi_color file into component channels
     nhdr_dir = os.path.join(results_dir,'nhdr')
     name = f'{runno}_{roi_string_for_names}_tdi_color.nhdr'
+    purpose = f"{runno}_{roi_string_for_names}_tdi_color_split"
     in_file = os.path.join(nhdr_dir, name)
     out_base = os.path.join(nhdr_dir, name.removesuffix(".nhdr"))
     mat_code=f"i='{in_file}';o='{out_base}';image_channel_split(i,o);";
@@ -234,7 +232,7 @@ def setup_pipeline(runno, roi_tuple, project_code="24.chdi.01", dry_run=False, s
         f.write(mat_code)
 
     cmd = "\"run('{}'); exit;\"".format(mat_script)
-    cmd = "matlab -nosplash -nodisplay -nodesktop -r {} -logfile {}".format(cmd, log_file)
+    cmd = f"matlab_run {cmd} --purpose={purpose} --dir_work={work_dir}"
     # checking for existing split channel colors here
     found_channels = glob.glob(os.path.join(nhdr_dir,f'{name.removesuffix(".nhdr")}_*.nhdr'))
     cmds.append(cmd) if not len(found_channels) > 2 else cmds.append(f"#{cmd}")
