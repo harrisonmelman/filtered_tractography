@@ -8,7 +8,6 @@ import datetime
 from pathlib import Path
 import time
 import shutil
-import glob
 import random
 import string 
 
@@ -86,7 +85,7 @@ def precompute_tractography(runno, biggus_diskus: Path, seed_count=2000000, fa_t
     # Input paths
     in_dir = biggus_diskus / "connectome_cache"
     # TODO: pathlib
-    fib_file = glob.glob(in_dir / f"nii4D_{runno}*.fib.gz")[0]
+    fib_file = next(in_dir.glob(f"nii4D_{runno}*.fib.gz"),None)
     # unused in this function
     label_file = in_dir / "labels" / "RCCF" / f"{runno}_RCCF_labels.nii.gz"
     log_file = work_dir / f"pipe_log-{datetime.datetime.now().strftime('%Y%m%d%H%M')}.log"
@@ -100,7 +99,7 @@ def precompute_tractography(runno, biggus_diskus: Path, seed_count=2000000, fa_t
         # do not worry about parallel here, as only doing a couple
         import nibabel as nib
         import numpy as np
-        img = glob.glob(in_dir / f"nii4D_{runno}*.nqa.nii.gz")[0]
+        img = next(in_dir.glob(f"nii4D_{runno}*.nqa.nii.gz"),None)
         data = nib.load(img).get_fdata()
         data=data[data!=0]
         data.sort()
@@ -163,7 +162,7 @@ def setup_pipeline(runno, roi_tuple, biggus_diskus: Path, project_code="24.chdi.
     
     # Input paths
     in_dir = biggus_diskus / "connectome_cache"
-    fib_file = glob.glob(in_dir / f"nii4D_{runno}*.fib.gz")[0]
+    fib_file = next(in_dir.glob(f"nii4D_{runno}*.fib.gz"),None)
     label_file = in_dir / f"{runno}_RCCF_labels.nii.gz"
     full_trk_file = work_dir / f"nii4D_{runno}.src.gqi.0.9.fib.2000K.tt.gz"
 
@@ -233,7 +232,9 @@ def setup_pipeline(runno, roi_tuple, biggus_diskus: Path, project_code="24.chdi.
     cmd = "\"run('{}'); exit;\"".format(mat_script)
     cmd = f"matlab_run {cmd} --purpose={purpose} --dir_work={work_dir}"
     # checking for existing split channel colors here
-    found_channels = glob.glob(nhdr_dir / f'{name.removesuffix(".nhdr")}_*.nhdr')
+    # this one I want to cast to list instead of using next
+    # because all I care about is how many did I find
+    found_channels = list(nhdr_dir.glob(f'{name.removesuffix(".nhdr")}_*.nhdr'))
     cmds.append(cmd) if not len(found_channels) > 2 else cmds.append(f"#{cmd}")
 
     # copy the split channel colors into the SAMBA inputs directory
@@ -246,7 +247,7 @@ def setup_pipeline(runno, roi_tuple, biggus_diskus: Path, project_code="24.chdi.
     SAMBA_work_dir = biggus_diskus / f'VBM_24chdi01_chass_symmetric5-work'
     clean_inputs_dir = SAMBA_work_dir / 'clean_inputs'
     clean_masked_dir = SAMBA_work_dir / 'clean_masked'
-    for filepath in glob.glob(nhdr_dir / f'{name.removesuffix(".nhdr")}_*'):
+    for filepath in nhdr_dir.glob(f'{name.removesuffix(".nhdr")}_*'):
         fn = filepath.name
         # put it into the nhdr dir
         outf = project_nhdr_dir / fn
@@ -281,19 +282,17 @@ def setup_pipeline(runno, roi_tuple, biggus_diskus: Path, project_code="24.chdi.
 
 # TODO: this is all too baked into assumptions
 # use glob/pa3ttern matching to find your input files. 
-def prepull_data(project_code,runno,biggus_diskus,archive_suffix=""):
+def prepull_data(project_code,runno,biggus_diskus,archive_suffix="", label_type="RCCF"):
     print(f"Pulling data for {runno}")
     in_dir = Path(f"/mnt/nclin-comp-pri.dhe.duke.edu/dusom_civm-atlas/{project_code}/research", f"connectome{runno}dsi_studio{archive_suffix}")
     # what do i do if I find more than one? Am I likely to have that happen? Do I even care? Not sure. 
-    fib_files = glob.glob(in_dir / f"nii4D_{runno}*.fib.gz")
-    if len(fib_files) != 1:
-        print(f"found {len(fib_files)} fib files for {runno}. skipping")
-        return None
-    fib_file = fib_files[0]
-    qa_niis = glob.glob(in_dir / f"nii4D_{runno}*.nqa.nii.gz")
-    qa_nii = qa_niis[0] if len(qa_niis) >= 1 else None
-    # TODO: label TYPE (gaj projects needs WHS labels)
-    label_file = in_dir / "labels" / "RCCF" / f"{runno}_RCCF_labels.nii.gz"
+    fib_files = in_dir.glob(f"nii4D_{runno}*.fib.gz")
+    fib_file = next(fib_files, None)
+    # Path.glob returns an iterator. next returns the next item in the iterator (or None, if empty)
+    qa_nii = next(in_dir.glob(f"nii4D_{runno}*.nqa.nii.gz"), None)
+    # TODO: pulling nhdr files from archive should be optional
+    # let it run and crash as late as possible
+    label_file = in_dir / "labels" / label_type / f"{runno}_{label_type}_labels.nii.gz"
     tdi_nhdr = in_dir / 'nhdr' / f"{runno}_tdi.nhdr"
     tdi_color_nhdr = in_dir / 'nhdr' / f"{runno}_tdi_color.nhdr"
     files_to_copy = [fib_file, label_file, tdi_nhdr, tdi_color_nhdr, qa_nii]
