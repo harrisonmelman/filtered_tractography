@@ -75,21 +75,25 @@ def make_cluster_command(cmds, out_dir, job_name, memory="40G"):
 # you are free to override
 def precompute_tractography(runno, seed_count=2000000, fa_thresh_pct=10, step_size=0.01, smoothing=0.01, min_length=0.5, max_length=200, turn_angle=45, name_tag="", biggus_diskus=os.environ["BIGGUS_DISKUS"]):
     # --- Setup Paths ---
-    work_dir = os.path.join(biggus_diskus,"filtered_tracking",f"tracking{runno}dsi_studio{name_tag}-work")
-    bash_stub_dir = os.path.join(work_dir,'bash_stub')
-    os.makedirs(work_dir,exist_ok=True) if not os.path.exists(work_dir) else print(f"{work_dir} already exists")
-    os.makedirs(bash_stub_dir,exist_ok=True) if not os.path.exists(bash_stub_dir) else print(f"{bash_stub_dir} already exists")
+    biggus_diskus = Path(biggus_diskus)
+    work_dir = biggus_diskus / "filtered_tracking" / f"tracking{runno}dsi_studio{name_tag}-work"
+    bash_stub_dir = work_dir / 'bash_stub'
+    for x in [work_dir, bash_stub_dir]:
+        try:
+            x.mkdir(parents=True, exist_ok=False)
+        except FileExistsError:
+            print(f"{x} already exists")
     
     # Input paths
     in_dir = Path(biggus_diskus,"connectome_cache")
-    fib_file = glob.glob(os.path.join(in_dir,f"nii4D_{runno}*.fib.gz"))[0]
+    # TODO: pathlib
+    fib_file = glob.glob(in_dir / f"nii4D_{runno}*.fib.gz")[0]
     # unused in this function
-    label_file = os.path.join(in_dir,"labels","RCCF",f"{runno}_RCCF_labels.nii.gz")
-        
-    log_file = os.path.join(work_dir,f"pipe_log-{datetime.datetime.now().strftime('%Y%m%d%H%M')}.log")
+    label_file = in_dir / "labels" / "RCCF" / f"{runno}_RCCF_labels.nii.gz"
+    log_file = work_dir / f"pipe_log-{datetime.datetime.now().strftime('%Y%m%d%H%M')}.log"
 
-    thresh_file = os.path.join(in_dir,f"{runno}_threshold_at_{fa_thresh_pct}pct_nqa.txt")
-    if os.path.exists(thresh_file):
+    thresh_file = in_dir / f"{runno}_threshold_at_{fa_thresh_pct}pct_nqa.txt"
+    if thresh_file.exists():
         with open(thresh_file, 'r') as f:
             fa_thresh_pct = f.read().strip()
     else:
@@ -97,7 +101,7 @@ def precompute_tractography(runno, seed_count=2000000, fa_thresh_pct=10, step_si
         # do not worry about parallel here, as only doing a couple
         import nibabel as nib
         import numpy as np
-        img = glob.glob(os.path.join(in_dir,f"nii4D_{runno}*.nqa.nii.gz"))[0]
+        img = glob.glob(in_dir / f"nii4D_{runno}*.nqa.nii.gz")[0]
         data = nib.load(img).get_fdata()
         data=data[data!=0]
         data.sort()
@@ -105,9 +109,9 @@ def precompute_tractography(runno, seed_count=2000000, fa_thresh_pct=10, step_si
         with open(thresh_file,'w') as f:
             print(fa_thresh_pct, file=f)
 
-    full_trk_file = os.path.join(work_dir,f"nii4D_{runno}.src.gqi.0.9.fib.2000K.tt.gz")
+    full_trk_file = work_dir / f"nii4D_{runno}.src.gqi.0.9.fib.2000K.tt.gz"
             
-    if not os.path.exists(full_trk_file):
+    if not full_trk_file.exists():
         cmd = (
             f"{DSI_STUDIO_BIN} --action=trk --source={fib_file} "+
             f"--output={full_trk_file} --fiber_count={seed_count} "+
@@ -147,21 +151,22 @@ def run_both_sides(runno, roi_tuple, dry_run=False, run_both_sides_override=Fals
 # the end result of this will be ONE cmd, to be returned and added to cmds
 def setup_pipeline(runno, roi_tuple, project_code="24.chdi.01", dry_run=False, skip_SAMBA_copy=False, name_tag="", biggus_diskus=os.environ["BIGGUS_DISKUS"]):
     # --- Setup Paths ---
-    work_dir = os.path.join(biggus_diskus,"filtered_tracking",f"tracking{runno}dsi_studio{name_tag}-work")
-    results_dir = os.path.join(biggus_diskus,"filtered_tracking",f"tracking{runno}dsi_studio{name_tag}-results")
-    results_nhdr_dir = os.path.join(results_dir, 'nhdr')
-    bash_stub_dir = os.path.join(work_dir,'bash_stub')
-    os.makedirs(work_dir,exist_ok=True) if not os.path.exists(work_dir) else print(f"{work_dir} already exists")
-    os.makedirs(results_dir,exist_ok=True) if not os.path.exists(results_dir) else print(f"{results_dir} already exists")
-    os.makedirs(bash_stub_dir,exist_ok=True) if not os.path.exists(bash_stub_dir) else print(f"{bash_stub_dir} already exists")
-    os.makedirs(results_nhdr_dir,exist_ok=True) if not os.path.exists(results_nhdr_dir) else print(f"{results_nhdr_dir} already exists")
+    work_dir = biggus_diskus / "filtered_tracking" / f"tracking{runno}dsi_studio{name_tag}-work"
+    results_dir = biggus_diskus / "filtered_tracking" / f"tracking{runno}dsi_studio{name_tag}-results"
+    results_nhdr_dir = results_dir / 'nhdr'
+    bash_stub_dir = work_dir / 'bash_stub'
+    for x in [work_dir, bash_stub_dir, results_dir, results_nhdr_dir]:
+        try:
+            x.mkdir(parents=True, exist_ok=False)
+        except FileExistsError:
+            print(f"{x} already exists")
 
     
     # Input paths
     in_dir = Path(biggus_diskus,"connectome_cache")
-    fib_file = glob.glob(os.path.join(in_dir,f"nii4D_{runno}*.fib.gz"))[0]
-    label_file = os.path.join(in_dir,f"{runno}_RCCF_labels.nii.gz")
-    full_trk_file = os.path.join(work_dir,f"nii4D_{runno}.src.gqi.0.9.fib.2000K.tt.gz")
+    fib_file = glob.glob(in_dir / f"nii4D_{runno}*.fib.gz")[0]
+    label_file = in_dir / f"{runno}_RCCF_labels.nii.gz"
+    full_trk_file = work_dir / f"nii4D_{runno}.src.gqi.0.9.fib.2000K.tt.gz"
 
     cmds = []
     tract_file = full_trk_file
@@ -174,30 +179,32 @@ def setup_pipeline(runno, roi_tuple, project_code="24.chdi.01", dry_run=False, s
         else:
             roi_string_for_names=f"{roi_string_for_names}_{roi}"
         roi_string = f"{label_file}:{roi}"
-        out_file = os.path.join(work_dir, f"{runno}_{roi_string_for_names}.tt.gz")
+        out_file = work_dir / f"{runno}_{roi_string_for_names}.tt.gz"
         if i == len(roi_tuple)-1:
             # the last one (which we explort tdi,tdi_color files from) is saved into the results dir
             # this is the file out_file will be set to for the rest of this function, after the for loop, as well
             # IS THIS A SAFE ASSUMPTION?
             # testing proves out_file stays in the scope after we exit the loop. i ddin't expect that. apparantly it's fine
             # https://stackoverflow.com/questions/3611760/scoping-in-python-for-loops
-            out_file = os.path.join(results_dir, f"{runno}_{roi_string_for_names}.tt.gz")
+            out_file = results_dir / f"{runno}_{roi_string_for_names}.tt.gz"
         cmd = f"{DSI_STUDIO_BIN} --action=ana --source={fib_file} --tract={tract_file} --roi={roi_string} --output={out_file}"
-        cmds.append(cmd) if not os.path.exists(out_file) else cmds.append(f"#{cmd}")
+        cmds.append(cmd) if not out_file.exists() else cmds.append(f"#{cmd}")
 
     # export tdi and tdi_color
     cmd = f"{DSI_STUDIO_BIN} --action=ana  --source={fib_file} --tract={out_file} --export=tdi,tdi_color"
-    cmds.append(cmd) if not os.path.exists(f"{out_file}.tdi_color.nii.gz") else cmds.append(f"#{cmd}")
+    # file.with_name(x) returns dirname(file)/x
+    cmds.append(cmd) if not out_file.with_name(f"{out_file.name}.tdi_color.nii.gz").exists() else cmds.append(f"#{cmd}")
+
 
     # create the tdi.nhdr and tdi_color.nhdr which describe the nifti files
     # done by copying an example from the archive and adjusting the data file path
     # use sed for this. remember this is a bash cluster process, not python code that will be running 
     for contrast in ["tdi","tdi_color"]:
-        nhdr_template =  f"{in_dir}/{runno}_{contrast}.nhdr"
-        out_nhdr = f"{results_dir}/nhdr/{runno}_{roi_string_for_names}_{contrast}{name_tag}.nhdr"
+        nhdr_template =  in_dir / f"{runno}_{contrast}.nhdr"
+        out_nhdr = results_dir / f"nhdr/{runno}_{roi_string_for_names}_{contrast}{name_tag}.nhdr"
         cmd = f"cp {nhdr_template} {out_nhdr}"
-        cmds.append(cmd) if not os.path.exists(out_nhdr) else cmds.append(f"#{cmd}")
-        new_filename = os.path.basename(out_file)
+        cmds.append(cmd) if not out_nhdr.exists() else cmds.append(f"#{cmd}")
+        new_filename = out_file.name
         new_filename = f"../{new_filename}.{contrast}.nii.gz"
         cmd = f'sed -i "s|data file.*|data file: {new_filename}|" {out_nhdr}'
         cmds.append(cmd)
@@ -214,11 +221,11 @@ def setup_pipeline(runno, roi_tuple, project_code="24.chdi.01", dry_run=False, s
 
 
     # split the tdi_color file into component channels
-    nhdr_dir = os.path.join(results_dir,'nhdr')
+    nhdr_dir = results_dir / 'nhdr'
     name = f'{runno}_{roi_string_for_names}_tdi_color.nhdr'
     purpose = f"{runno}_{roi_string_for_names}_tdi_color_split"
-    in_file = os.path.join(nhdr_dir, name)
-    out_base = os.path.join(nhdr_dir, name.removesuffix(".nhdr"))
+    in_file = nhdr_dir / name
+    out_base = nhdr_dir / name.removesuffix(".nhdr")
     mat_code=f"i='{in_file}';o='{out_base}';image_channel_split(i,o);";
     with open(mat_script, 'w') as f:
         f.write("run('/cm/shared/workstation/code/shared/pipeline_utilities/startup.m');")
@@ -227,7 +234,7 @@ def setup_pipeline(runno, roi_tuple, project_code="24.chdi.01", dry_run=False, s
     cmd = "\"run('{}'); exit;\"".format(mat_script)
     cmd = f"matlab_run {cmd} --purpose={purpose} --dir_work={work_dir}"
     # checking for existing split channel colors here
-    found_channels = glob.glob(os.path.join(nhdr_dir,f'{name.removesuffix(".nhdr")}_*.nhdr'))
+    found_channels = glob.glob(nhdr_dir / f'{name.removesuffix(".nhdr")}_*.nhdr')
     cmds.append(cmd) if not len(found_channels) > 2 else cmds.append(f"#{cmd}")
 
     # copy the split channel colors into the SAMBA inputs directory
@@ -236,39 +243,39 @@ def setup_pipeline(runno, roi_tuple, project_code="24.chdi.01", dry_run=False, s
     # just because 'color' is in the name
     # any file which has pattern color_*.[nhdr,raw] is a color component\
 
-    project_nhdr_dir = os.path.join(biggus_diskus,f'{project_code}_nhdr')
-    SAMBA_work_dir = os.path.join(biggus_diskus,f'VBM_24chdi01_chass_symmetric5-work')
-    clean_inputs_dir = os.path.join(SAMBA_work_dir,'clean_inputs')
-    clean_masked_dir = os.path.join(SAMBA_work_dir,'clean_masked')
-    for filepath in glob.glob(os.path.join(nhdr_dir,f'{name.removesuffix(".nhdr")}_*')):
-        fn = os.path.basename(filepath)
+    project_nhdr_dir = biggus_diskus / f'{project_code}_nhdr'
+    SAMBA_work_dir = biggus_diskus / f'VBM_24chdi01_chass_symmetric5-work'
+    clean_inputs_dir = SAMBA_work_dir / 'clean_inputs'
+    clean_masked_dir = SAMBA_work_dir / 'clean_masked'
+    for filepath in glob.glob(nhdr_dir / f'{name.removesuffix(".nhdr")}_*'):
+        fn = filepath.name
         # put it into the nhdr dir
-        outf = f"{project_nhdr_dir}/{fn}"
+        outf = project_nhdr_dir / fn
         cmd = f"cp {filepath} {outf}"
-        cmds.append(cmd) if not os.path.exists(outf) else cmds.append(f"#{cmd}")
+        cmds.append(cmd) if not outf.exists() else cmds.append(f"#{cmd}")
 
         # put it into clean_inputs
-        outf = f"{clean_inputs_dir}/{fn}"
+        outf = clean_inputs_dir / fn
         cmd = f"cp {filepath} {outf}"
-        cmds.append(cmd) if not os.path.exists(outf) else cmds.append(f"#{cmd}")
+        cmds.append(cmd) if not outf.exists() else cmds.append(f"#{cmd}")
 
         # put it into clean_masked
         # for clean masked(nhdr only) i also need to rename it
         if filepath.endswith('.nhdr'):
-            outf = f"{clean_masked_dir}/{fn}"
-            outf_name_corrected = f"{clean_masked_dir}/{fn.removesuffix('.nhdr')}_masked.nhdr"
+            outf = clean_masked_dir / fn
+            outf_name_corrected = clean_masked_dir / f"{fn.name.removesuffix('.nhdr')}_masked.nhdr"
             # only do the copy if the RENAMED destination file does not exist
             # otherwise we will make a mess and have both renamed and unrenamed files in clean_masked
             cmd = f"cp {filepath} {outf}"
-            cmds.append(cmd) if not os.path.exists(outf_name_corrected) else cmds.append(f"#{cmd}")
+            cmds.append(cmd) if not outf_name_corrected.exists() else cmds.append(f"#{cmd}")
             cmd = f"mv {outf} {outf_name_corrected}"
-            cmds.append(cmd) if not os.path.exists(outf_name_corrected) else cmds.append(f"#{cmd}")
+            cmds.append(cmd) if not outf_name_corrected.exists() else cmds.append(f"#{cmd}")
         else:
             # for the raw files, i do not want to rename their filenames
             # else i would also need to update data file: field in the nhdr
-            outf = f"{clean_masked_dir}/{fn}"
+            outf = clean_masked_dir / fn
             cmd = f"cp {filepath} {outf}"
-            cmds.append(cmd) if not os.path.exists(outf) else cmds.append(f"#{cmd}")
+            cmds.append(cmd) if not outf.exists() else cmds.append(f"#{cmd}")
 
     return make_cluster_command(cmds,bash_stub_dir,f"{runno}_filter_and_nrrdify")
 
@@ -277,37 +284,38 @@ def setup_pipeline(runno, roi_tuple, project_code="24.chdi.01", dry_run=False, s
 # use glob/pa3ttern matching to find your input files. 
 def prepull_data(project_code,runno,archive_suffix="", biggus_diskus=os.environ["BIGGUS_DISKUS"]):
     print(f"Pulling data for {runno}")
-    ARCHIVE_ROOT = Path(f"/mnt/nclin-comp-pri.dhe.duke.edu/dusom_civm-atlas/{project_code}/research")
-    in_dir = os.path.join(ARCHIVE_ROOT,f"connectome{runno}dsi_studio{archive_suffix}")
+    in_dir = Path(f"/mnt/nclin-comp-pri.dhe.duke.edu/dusom_civm-atlas/{project_code}/research", f"connectome{runno}dsi_studio{archive_suffix}")
     # what do i do if I find more than one? Am I likely to have that happen? Do I even care? Not sure. 
-    fib_files = glob.glob(os.path.join(in_dir,f"nii4D_{runno}*.fib.gz"))
+    fib_files = glob.glob(in_dir / f"nii4D_{runno}*.fib.gz")
     if len(fib_files) != 1:
         print(f"found {len(fib_files)} fib files for {runno}. skipping")
         return None
     fib_file = fib_files[0]
-    qa_niis = glob.glob(os.path.join(in_dir,f"nii4D_{runno}*.nqa.nii.gz"))
+    qa_niis = glob.glob(in_dir / f"nii4D_{runno}*.nqa.nii.gz")
     qa_nii = qa_niis[0] if len(qa_niis) >= 1 else None
     # TODO: label TYPE (gaj projects needs WHS labels)
-    label_file = os.path.join(in_dir,"labels","RCCF",f"{runno}_RCCF_labels.nii.gz")
-    tdi_nhdr = os.path.join(in_dir,'nhdr',f"{runno}_tdi.nhdr")
-    tdi_color_nhdr = os.path.join(in_dir,'nhdr',f"{runno}_tdi_color.nhdr")
+    label_file = in_dir / "labels" / "RCCF" / f"{runno}_RCCF_labels.nii.gz"
+    tdi_nhdr = in_dir / 'nhdr' / f"{runno}_tdi.nhdr"
+    tdi_color_nhdr = in_dir / 'nhdr' / f"{runno}_tdi_color.nhdr"
     files_to_copy = [fib_file, label_file, tdi_nhdr, tdi_color_nhdr, qa_nii]
 
     out_dir = Path(biggus_diskus,"connectome_cache")
-    os.makedirs(out_dir,exist_ok=True) if not os.path.exists(out_dir) else print(f"{out_dir} already exists")
-    #shutil.copyfile(src, dst)
+    try:
+        out_dir.mkdir(parents=True, exist_ok=False)
+    except FileExistsError:
+        print(f"{out_dir} already exists")
     # necessary items are fib_file, label_file, tdi_nhdr, tdi_color_nhdr
     for in_file in files_to_copy:
-        fn = os.path.basename(in_file)
-        out_file = os.path.join(out_dir,fn)
-        shutil.copyfile(in_file,out_file) if not os.path.exists(out_file) else print(f"out_file already copied")
+        fn = in_file.name
+        out_file = out_dir / fn
+        shutil.copyfile(in_file,out_file) if not out_file.exists() else print(f"out_file already copied")
 
     # also copy pct threshold file, but it must bee renamed bc no mention of runno in its file name 
-    in_file = os.path.join(in_dir,'threshold_at_10pct_nqa.txt')
-    fn = os.path.basename(in_file)
+    in_file = in_dir / 'threshold_at_10pct_nqa.txt'
+    fn = in_file.name
     fn = f"{runno}_{fn}"
-    out_file = os.path.join(out_dir,fn)
-    shutil.copyfile(in_file,out_file) if not os.path.exists(out_file) else print(f"out_file already copied")
+    out_file = out_dir / fn
+    shutil.copyfile(in_file,out_file) if not out_file.exists() else print(f"out_file already copied")
 
 
 def load_list_file(list_file):
