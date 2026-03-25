@@ -84,8 +84,9 @@ def precompute_tractography(runno, biggus_diskus: Path, seed_count=2000000, fa_t
     
     # Input paths
     in_dir = biggus_diskus / "connectome_cache"
-    # TODO: pathlib
     fib_file = next(in_dir.glob(f"nii4D_{runno}*.fib.gz"),None)
+    if fib_file is None:
+        raise FileNotFoundError(f"Missing fib file for runno {runno}. Cannot continue.")
     # unused in this function
     label_file = in_dir / "labels" / "RCCF" / f"{runno}_RCCF_labels.nii.gz"
     log_file = work_dir / f"pipe_log-{datetime.datetime.now().strftime('%Y%m%d%H%M')}.log"
@@ -100,6 +101,8 @@ def precompute_tractography(runno, biggus_diskus: Path, seed_count=2000000, fa_t
         import nibabel as nib
         import numpy as np
         img = next(in_dir.glob(f"nii4D_{runno}*.nqa.nii.gz"),None)
+        if img is None:
+            raise FileNotFoundError(f"Missing nii4D_{runno}*.nqa.nii.gz file in {in_dir}")
         data = nib.load(img).get_fdata()
         data=data[data!=0]
         data.sort()
@@ -165,6 +168,9 @@ def setup_pipeline(runno, roi_tuple, biggus_diskus: Path, project_code="24.chdi.
     fib_file = next(in_dir.glob(f"nii4D_{runno}*.fib.gz"),None)
     label_file = in_dir / f"{runno}_RCCF_labels.nii.gz"
     full_trk_file = work_dir / f"nii4D_{runno}.src.gqi.0.9.fib.2000K.tt.gz"
+    if not fib_file.exists() or not label_file.exists() or not full_trk_file.exists():
+        # these are all required for subsequent steps
+        raise FileNotFoundError(f"Missing inputs for runno {runno} in {in_dir}")
 
     cmds = []
     tract_file = full_trk_file
@@ -215,8 +221,6 @@ def setup_pipeline(runno, roi_tuple, biggus_diskus: Path, project_code="24.chdi.
     timestamp = "_".join(str(time.time()).split("."))
     mat_script = "{}/run_from_python_{}.m".format(bash_stub_dir, timestamp)
     Path(mat_script).touch()
-
-
 
     # split the tdi_color file into component channels
     nhdr_dir = results_dir / 'nhdr'
@@ -306,17 +310,25 @@ def prepull_data(project_code,runno,biggus_diskus,archive_suffix="", label_type=
     for in_file in files_to_copy:
         fn = in_file.name
         out_file = out_dir / fn
-        shutil.copyfile(in_file,out_file) if not out_file.exists() else print(f"out_file already copied")
+        if in_file is None or not in_file.exists():
+            print(f"{in_file} does not exist. Cannot copy. Code will crash later if that's an issue")
+        if not out_file.exists():
+            shutil.copyfile(in_file,out_file)
+        else:
+            print(f"{out_file} already copied")
 
     # also copy pct threshold file, but it must bee renamed bc no mention of runno in its file name 
     in_file = in_dir / 'threshold_at_10pct_nqa.txt'
     fn = in_file.name
     fn = f"{runno}_{fn}"
     out_file = out_dir / fn
-    shutil.copyfile(in_file,out_file) if not out_file.exists() else print(f"out_file already copied")
+    if in_file.exists() and not out_file.exists():
+        shutil.copyfile(in_file,out_file)
 
 
 def load_list_file(list_file):
+    if not list_file.exists():
+        raise FileNotFoundError(f"{list_file} does not exist")
     with open(list_file,'r') as f:
         return f.read().strip().split('\n')
 
