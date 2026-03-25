@@ -73,9 +73,8 @@ def make_cluster_command(cmds, out_dir, job_name, memory="40G"):
 
 # all optional arguments have defaults set to pipeline parameters
 # you are free to override
-def precompute_tractography(runno, seed_count=2000000, fa_thresh_pct=10, step_size=0.01, smoothing=0.01, min_length=0.5, max_length=200, turn_angle=45, name_tag="", biggus_diskus=os.environ["BIGGUS_DISKUS"]):
+def precompute_tractography(runno, biggus_diskus: Path, seed_count=2000000, fa_thresh_pct=10, step_size=0.01, smoothing=0.01, min_length=0.5, max_length=200, turn_angle=45, name_tag=""):
     # --- Setup Paths ---
-    biggus_diskus = Path(biggus_diskus)
     work_dir = biggus_diskus / "filtered_tracking" / f"tracking{runno}dsi_studio{name_tag}-work"
     bash_stub_dir = work_dir / 'bash_stub'
     for x in [work_dir, bash_stub_dir]:
@@ -85,7 +84,7 @@ def precompute_tractography(runno, seed_count=2000000, fa_thresh_pct=10, step_si
             print(f"{x} already exists")
     
     # Input paths
-    in_dir = Path(biggus_diskus,"connectome_cache")
+    in_dir = biggus_diskus / "connectome_cache"
     # TODO: pathlib
     fib_file = glob.glob(in_dir / f"nii4D_{runno}*.fib.gz")[0]
     # unused in this function
@@ -126,7 +125,7 @@ def precompute_tractography(runno, seed_count=2000000, fa_thresh_pct=10, step_si
         return None
 
 
-def run_both_sides(runno, roi_tuple, dry_run=False, run_both_sides_override=False, skip_SAMBA_copy=False, name_tag=""):
+def run_both_sides(runno, roi_tuple, biggus_diskus: Path, dry_run=False, run_both_sides_override=False, skip_SAMBA_copy=False, name_tag=""):
     if len(roi_tuple)==2 and not abs(roi_tuple - roi_tuple[1]) - offset:
         # we only reach this if abs(roi_tuple - roi_tuple[1]) - offset is exactly 0
         # this means we have 2 regions, and they are the same on the opposite side of thebrian
@@ -140,16 +139,16 @@ def run_both_sides(runno, roi_tuple, dry_run=False, run_both_sides_override=Fals
         x = roi+offset if roi<offset else roi-offset
         roi_tuple_otherside.append(x)
     roi_tuple_otherside = tuple(roi_tuple_otherside)
-    cmds.append(setup_pipeline(runno, roi_tuple, dry_run=dry_run, skip_SAMBA_copy=skip_SAMBA_copy, name_tag=name_tag))
+    cmds.append(setup_pipeline(runno, roi_tuple, biggus_diskus, dry_run=dry_run, skip_SAMBA_copy=skip_SAMBA_copy, name_tag=name_tag))
     if run_both_sides_override:
         return cmds
-    cmds.append(setup_pipeline(runno, roi_tuple_otherside, dry_run=dry_run, skip_SAMBA_copy=skip_SAMBA_copy, name_tag=name_tag))
+    cmds.append(setup_pipeline(runno, roi_tuple_otherside, biggus_diskus, dry_run=dry_run, skip_SAMBA_copy=skip_SAMBA_copy, name_tag=name_tag))
     return cmds
 
 # this handles all logic for creating one filtered track and tdi file
 # filters by roi1, then filters by roi2, then exports to tdi/tdi_color
 # the end result of this will be ONE cmd, to be returned and added to cmds
-def setup_pipeline(runno, roi_tuple, project_code="24.chdi.01", dry_run=False, skip_SAMBA_copy=False, name_tag="", biggus_diskus=os.environ["BIGGUS_DISKUS"]):
+def setup_pipeline(runno, roi_tuple, biggus_diskus: Path, project_code="24.chdi.01", dry_run=False, skip_SAMBA_copy=False, name_tag=""):
     # --- Setup Paths ---
     work_dir = biggus_diskus / "filtered_tracking" / f"tracking{runno}dsi_studio{name_tag}-work"
     results_dir = biggus_diskus / "filtered_tracking" / f"tracking{runno}dsi_studio{name_tag}-results"
@@ -163,7 +162,7 @@ def setup_pipeline(runno, roi_tuple, project_code="24.chdi.01", dry_run=False, s
 
     
     # Input paths
-    in_dir = Path(biggus_diskus,"connectome_cache")
+    in_dir = biggus_diskus / "connectome_cache"
     fib_file = glob.glob(in_dir / f"nii4D_{runno}*.fib.gz")[0]
     label_file = in_dir / f"{runno}_RCCF_labels.nii.gz"
     full_trk_file = work_dir / f"nii4D_{runno}.src.gqi.0.9.fib.2000K.tt.gz"
@@ -282,7 +281,7 @@ def setup_pipeline(runno, roi_tuple, project_code="24.chdi.01", dry_run=False, s
 
 # TODO: this is all too baked into assumptions
 # use glob/pa3ttern matching to find your input files. 
-def prepull_data(project_code,runno,archive_suffix="", biggus_diskus=os.environ["BIGGUS_DISKUS"]):
+def prepull_data(project_code,runno,biggus_diskus,archive_suffix=""):
     print(f"Pulling data for {runno}")
     in_dir = Path(f"/mnt/nclin-comp-pri.dhe.duke.edu/dusom_civm-atlas/{project_code}/research", f"connectome{runno}dsi_studio{archive_suffix}")
     # what do i do if I find more than one? Am I likely to have that happen? Do I even care? Not sure. 
@@ -329,7 +328,7 @@ def load_list_files(ages, project_code="24.chdi.01"):
     for age in ages:
         for condition in ['HET','WILD']:
             for sex in ['M','F']:
-                homedir=os.environ["HOME"]
+                homedir=os.getenv("HOME")
                 list_file = f"{homedir}/Projects/{project_code}/list/{project_code}-{age}-{condition}-{sex}.list"
                 new_runnos = load_list_file(list_file)
                 runno_list.extend(new_runnos)
@@ -372,12 +371,11 @@ def tuple_type(s):
 
 def main():
     parser = argparse.ArgumentParser(description="Create connectome-filtered TDI_color files for SAMBA inputs")
-    parser.add_argument("--dry-run", action="store_true", help="Print sbatch commands without submitting")
     parser.add_argument("--runno_list","-r",nargs="*",type=str,help='The path to a list file, OR a list of runnos to operate on, separated by spaces')
     parser.add_argument("--project_code","-p",type=str)
     parser.add_argument("--label_type","-l",type=str,default="RCCF")
     parser.add_argument("--archive_suffix", type=str,default="")
-    parser.add_argument("--biggus_diskus", type=str,default=os.environ["BIGGUS_DISKUS"])
+    parser.add_argument("--biggus_diskus", type=Path,default=os.getenv("BIGGUS_DISKUS"))
     parser.add_argument("--roi_tuple_list", nargs="+",type=tuple_type,help='Pass a list of tuples formatted as (x,y)')
     parser.add_argument("--one_side_only",action="store_true",help="forces only calculation of asked for side, will not flip and operate",default=False)
     parser.add_argument("--dry_run",action="store_true",help="will only print the commands to run instead of running",default=False)
@@ -433,15 +431,15 @@ def main():
     # this is an immutable input that will always be used, much like the fib or label file
     for runno in args.runno_list:
         if not runno.startswith(("S","N")): continue
-        prepull_data(args.project_code,runno,args.archive_suffix)
-        cmd = precompute_tractography(runno, seed_count=args.seed_count,fa_thresh_pct=args.fa_thresh_pct,step_size=args.step_size,smoothing=args.smoothing,min_length=args.min_length,max_length=args.max_length,turn_angle=args.turn_angle, name_tag=args.name_tag)
+        prepull_data(args.project_code,runno,args.biggus_diskus,args.archive_suffix)
+        cmd = precompute_tractography(runno, args.biggus_diskus, seed_count=args.seed_count,fa_thresh_pct=args.fa_thresh_pct,step_size=args.step_size,smoothing=args.smoothing,min_length=args.min_length,max_length=args.max_length,turn_angle=args.turn_angle, name_tag=args.name_tag)
         cmds.append(cmd)
     cluster_run_cmds(cmds, args)
     #import pdb;pdb.set_trace()
     cmds = []
     for runno in args.runno_list:
         for roi_tuple in args.roi_tuple_list:
-            new_cmds = run_both_sides(runno, roi_tuple, args.dry_run, run_both_sides_override=args.one_side_only, skip_SAMBA_copy=True, name_tag=args.name_tag)
+            new_cmds = run_both_sides(runno, roi_tuple, args.biggus_diskus, args.dry_run, run_both_sides_override=args.one_side_only, skip_SAMBA_copy=True, name_tag=args.name_tag)
             # use extend instead of append, as run_both_sides* will return two cmds to run 
             cmds.extend(new_cmds)
     cluster_run_cmds(cmds, args)
