@@ -12,15 +12,8 @@ import glob
 import random
 import string 
 
-# the files in slop are just taht, slop
-# too confusing surfing around all that
-# try again...from scratch
-
 # --- CONFIGURATION ---
-BIGGUS = os.environ["BIGGUS_DISKUS"]
-CONNECTOME_CACHE = Path(f"{BIGGUS}/filtered_tracking/connectome_cache")
 DSI_STUDIO_BIN = "/cm/shared/workstation/aux/dsi_studio_2022-12-22/dsi_studio"
-MATLAB_BIN = "matlab"
 
 def cluster_run_cmds(cmds, args):
     # assumes cmds is a list of commands to be clusterfied and ran 
@@ -80,15 +73,15 @@ def make_cluster_command(cmds, out_dir, job_name, memory="40G"):
 
 # all optional arguments have defaults set to pipeline parameters
 # you are free to override
-def precompute_tractography(runno, seed_count=2000000, fa_thresh_pct=10, step_size=0.01, smoothing=0.01, min_length=0.5, max_length=200, turn_angle=45, name_tag=""):
+def precompute_tractography(runno, seed_count=2000000, fa_thresh_pct=10, step_size=0.01, smoothing=0.01, min_length=0.5, max_length=200, turn_angle=45, name_tag="", biggus_diskus=os.environ["BIGGUS_DISKUS"]):
     # --- Setup Paths ---
-    work_dir = os.path.join(BIGGUS,"filtered_tracking",f"tracking{runno}dsi_studio{name_tag}-work")
+    work_dir = os.path.join(biggus_diskus,"filtered_tracking",f"tracking{runno}dsi_studio{name_tag}-work")
     bash_stub_dir = os.path.join(work_dir,'bash_stub')
     os.makedirs(work_dir,exist_ok=True) if not os.path.exists(work_dir) else print(f"{work_dir} already exists")
     os.makedirs(bash_stub_dir,exist_ok=True) if not os.path.exists(bash_stub_dir) else print(f"{bash_stub_dir} already exists")
     
     # Input paths
-    in_dir = CONNECTOME_CACHE
+    in_dir = Path(biggus_diskus,"connectome_cache")
     fib_file = glob.glob(os.path.join(in_dir,f"nii4D_{runno}*.fib.gz"))[0]
     # unused in this function
     label_file = os.path.join(in_dir,"labels","RCCF",f"{runno}_RCCF_labels.nii.gz")
@@ -152,10 +145,10 @@ def run_both_sides(runno, roi_tuple, dry_run=False, run_both_sides_override=Fals
 # this handles all logic for creating one filtered track and tdi file
 # filters by roi1, then filters by roi2, then exports to tdi/tdi_color
 # the end result of this will be ONE cmd, to be returned and added to cmds
-def setup_pipeline(runno, roi_tuple, project_code="24.chdi.01", dry_run=False, skip_SAMBA_copy=False, name_tag=""):
+def setup_pipeline(runno, roi_tuple, project_code="24.chdi.01", dry_run=False, skip_SAMBA_copy=False, name_tag="", biggus_diskus=os.environ["BIGGUS_DISKUS"]):
     # --- Setup Paths ---
-    work_dir = os.path.join(BIGGUS,"filtered_tracking",f"tracking{runno}dsi_studio{name_tag}-work")
-    results_dir = os.path.join(BIGGUS,"filtered_tracking",f"tracking{runno}dsi_studio{name_tag}-results")
+    work_dir = os.path.join(biggus_diskus,"filtered_tracking",f"tracking{runno}dsi_studio{name_tag}-work")
+    results_dir = os.path.join(biggus_diskus,"filtered_tracking",f"tracking{runno}dsi_studio{name_tag}-results")
     results_nhdr_dir = os.path.join(results_dir, 'nhdr')
     bash_stub_dir = os.path.join(work_dir,'bash_stub')
     os.makedirs(work_dir,exist_ok=True) if not os.path.exists(work_dir) else print(f"{work_dir} already exists")
@@ -165,7 +158,7 @@ def setup_pipeline(runno, roi_tuple, project_code="24.chdi.01", dry_run=False, s
 
     
     # Input paths
-    in_dir = CONNECTOME_CACHE
+    in_dir = Path(biggus_diskus,"connectome_cache")
     fib_file = glob.glob(os.path.join(in_dir,f"nii4D_{runno}*.fib.gz"))[0]
     label_file = os.path.join(in_dir,f"{runno}_RCCF_labels.nii.gz")
     full_trk_file = os.path.join(work_dir,f"nii4D_{runno}.src.gqi.0.9.fib.2000K.tt.gz")
@@ -200,7 +193,7 @@ def setup_pipeline(runno, roi_tuple, project_code="24.chdi.01", dry_run=False, s
     # done by copying an example from the archive and adjusting the data file path
     # use sed for this. remember this is a bash cluster process, not python code that will be running 
     for contrast in ["tdi","tdi_color"]:
-        nhdr_template =  f"{CONNECTOME_CACHE}/{runno}_{contrast}.nhdr"
+        nhdr_template =  f"{in_dir}/{runno}_{contrast}.nhdr"
         out_nhdr = f"{results_dir}/nhdr/{runno}_{roi_string_for_names}_{contrast}{name_tag}.nhdr"
         cmd = f"cp {nhdr_template} {out_nhdr}"
         cmds.append(cmd) if not os.path.exists(out_nhdr) else cmds.append(f"#{cmd}")
@@ -243,8 +236,8 @@ def setup_pipeline(runno, roi_tuple, project_code="24.chdi.01", dry_run=False, s
     # just because 'color' is in the name
     # any file which has pattern color_*.[nhdr,raw] is a color component\
 
-    project_nhdr_dir = os.path.join(BIGGUS,f'{project_code}_nhdr')
-    SAMBA_work_dir = os.path.join(BIGGUS,f'VBM_24chdi01_chass_symmetric5-work')
+    project_nhdr_dir = os.path.join(biggus_diskus,f'{project_code}_nhdr')
+    SAMBA_work_dir = os.path.join(biggus_diskus,f'VBM_24chdi01_chass_symmetric5-work')
     clean_inputs_dir = os.path.join(SAMBA_work_dir,'clean_inputs')
     clean_masked_dir = os.path.join(SAMBA_work_dir,'clean_masked')
     for filepath in glob.glob(os.path.join(nhdr_dir,f'{name.removesuffix(".nhdr")}_*')):
@@ -282,7 +275,7 @@ def setup_pipeline(runno, roi_tuple, project_code="24.chdi.01", dry_run=False, s
 
 # TODO: this is all too baked into assumptions
 # use glob/pa3ttern matching to find your input files. 
-def prepull_data(project_code,runno,archive_suffix=""):
+def prepull_data(project_code,runno,archive_suffix="", biggus_diskus=os.environ["BIGGUS_DISKUS"]):
     print(f"Pulling data for {runno}")
     ARCHIVE_ROOT = Path(f"/mnt/nclin-comp-pri.dhe.duke.edu/dusom_civm-atlas/{project_code}/research")
     in_dir = os.path.join(ARCHIVE_ROOT,f"connectome{runno}dsi_studio{archive_suffix}")
@@ -300,7 +293,7 @@ def prepull_data(project_code,runno,archive_suffix=""):
     tdi_color_nhdr = os.path.join(in_dir,'nhdr',f"{runno}_tdi_color.nhdr")
     files_to_copy = [fib_file, label_file, tdi_nhdr, tdi_color_nhdr, qa_nii]
 
-    out_dir = CONNECTOME_CACHE
+    out_dir = Path(biggus_diskus,"connectome_cache")
     os.makedirs(out_dir,exist_ok=True) if not os.path.exists(out_dir) else print(f"{out_dir} already exists")
     #shutil.copyfile(src, dst)
     # necessary items are fib_file, label_file, tdi_nhdr, tdi_color_nhdr
@@ -376,6 +369,7 @@ def main():
     parser.add_argument("--project_code","-p",type=str)
     parser.add_argument("--label_type","-l",type=str,default="RCCF")
     parser.add_argument("--archive_suffix", type=str,default="")
+    parser.add_argument("--biggus_diskus", type=str,default=os.environ["BIGGUS_DISKUS"])
     parser.add_argument("--roi_tuple_list", nargs="+",type=tuple_type,help='Pass a list of tuples formatted as (x,y)')
     parser.add_argument("--one_side_only",action="store_true",help="forces only calculation of asked for side, will not flip and operate",default=False)
     parser.add_argument("--dry_run",action="store_true",help="will only print the commands to run instead of running",default=False)
