@@ -127,7 +127,7 @@ def precompute_tractography(runno, biggus_diskus: Path, seed_count=2000000, fa_t
         return None
 
 
-def run_both_sides(runno, roi_tuple, biggus_diskus: Path, dry_run=False, run_both_sides_override=False, skip_SAMBA_copy=False, name_tag=""):
+def run_both_sides(runno, roi_tuple, biggus_diskus: Path, dry_run=False, run_both_sides_override=False, name_tag=""):
     if len(roi_tuple)==2 and not abs(roi_tuple - roi_tuple[1]) - offset:
         # we only reach this if abs(roi_tuple - roi_tuple[1]) - offset is exactly 0
         # this means we have 2 regions, and they are the same on the opposite side of thebrian
@@ -141,16 +141,16 @@ def run_both_sides(runno, roi_tuple, biggus_diskus: Path, dry_run=False, run_bot
         x = roi+offset if roi<offset else roi-offset
         roi_tuple_otherside.append(x)
     roi_tuple_otherside = tuple(roi_tuple_otherside)
-    cmds.append(setup_pipeline(runno, roi_tuple, biggus_diskus, dry_run=dry_run, skip_SAMBA_copy=skip_SAMBA_copy, name_tag=name_tag))
+    cmds.append(setup_pipeline(runno, roi_tuple, biggus_diskus, dry_run=dry_run, name_tag=name_tag))
     if run_both_sides_override:
         return cmds
-    cmds.append(setup_pipeline(runno, roi_tuple_otherside, biggus_diskus, dry_run=dry_run, skip_SAMBA_copy=skip_SAMBA_copy, name_tag=name_tag))
+    cmds.append(setup_pipeline(runno, roi_tuple_otherside, biggus_diskus, dry_run=dry_run, name_tag=name_tag))
     return cmds
 
 # this handles all logic for creating one filtered track and tdi file
 # filters by roi1, then filters by roi2, then exports to tdi/tdi_color
 # the end result of this will be ONE cmd, to be returned and added to cmds
-def setup_pipeline(runno, roi_tuple, biggus_diskus: Path, project_code="24.chdi.01", dry_run=False, skip_SAMBA_copy=False, name_tag=""):
+def setup_pipeline(runno, roi_tuple, biggus_diskus: Path, project_code="24.chdi.01", dry_run=False, name_tag=""):
     # --- Setup Paths ---
     work_dir = biggus_diskus / "filtered_tracking" / f"tracking{runno}dsi_studio{name_tag}-work"
     results_dir = biggus_diskus / "filtered_tracking" / f"tracking{runno}dsi_studio{name_tag}-results"
@@ -214,7 +214,7 @@ def setup_pipeline(runno, roi_tuple, biggus_diskus: Path, project_code="24.chdi.
         cmds.append(cmd)
 
     skip_color_split = True
-    if skip_SAMBA_copy or skip_color_split:
+    if skip_color_split:
         return make_cluster_command(cmds,bash_stub_dir,f"{runno}_filter_and_nrrdify")
     
     # split tdi_color using matlab
@@ -235,53 +235,12 @@ def setup_pipeline(runno, roi_tuple, biggus_diskus: Path, project_code="24.chdi.
 
     cmd = "\"run('{}'); exit;\"".format(mat_script)
     cmd = f"matlab_run {cmd} --purpose={purpose} --dir_work={work_dir}"
+
     # checking for existing split channel colors here
     # this one I want to cast to list instead of using next
     # because all I care about is how many did I find
     found_channels = list(nhdr_dir.glob(f'{name.removesuffix(".nhdr")}_*.nhdr'))
     cmds.append(cmd) if not len(found_channels) > 2 else cmds.append(f"#{cmd}")
-
-    # copy the split channel colors into the SAMBA inputs directory
-    # due to a logical glitch with split-channel colors, must copy into 24.chdi.01_nhdr and VBM-work/clean_inputs
-    # otherwise SAMBA will try to force to split channels to get into clean_inputs
-    # just because 'color' is in the name
-    # any file which has pattern color_*.[nhdr,raw] is a color component\
-
-    project_nhdr_dir = biggus_diskus / f'{project_code}_nhdr'
-    SAMBA_work_dir = biggus_diskus / f'VBM_24chdi01_chass_symmetric5-work'
-    clean_inputs_dir = SAMBA_work_dir / 'clean_inputs'
-    clean_masked_dir = SAMBA_work_dir / 'clean_masked'
-    for filepath in nhdr_dir.glob(f'{name.removesuffix(".nhdr")}_*'):
-        fn = filepath.name
-        # put it into the nhdr dir
-        outf = project_nhdr_dir / fn
-        cmd = f"cp {filepath} {outf}"
-        cmds.append(cmd) if not outf.exists() else cmds.append(f"#{cmd}")
-
-        # put it into clean_inputs
-        outf = clean_inputs_dir / fn
-        cmd = f"cp {filepath} {outf}"
-        cmds.append(cmd) if not outf.exists() else cmds.append(f"#{cmd}")
-
-        # put it into clean_masked
-        # for clean masked(nhdr only) i also need to rename it
-        if filepath.endswith('.nhdr'):
-            outf = clean_masked_dir / fn
-            outf_name_corrected = clean_masked_dir / f"{fn.name.removesuffix('.nhdr')}_masked.nhdr"
-            # only do the copy if the RENAMED destination file does not exist
-            # otherwise we will make a mess and have both renamed and unrenamed files in clean_masked
-            cmd = f"cp {filepath} {outf}"
-            cmds.append(cmd) if not outf_name_corrected.exists() else cmds.append(f"#{cmd}")
-            cmd = f"mv {outf} {outf_name_corrected}"
-            cmds.append(cmd) if not outf_name_corrected.exists() else cmds.append(f"#{cmd}")
-        else:
-            # for the raw files, i do not want to rename their filenames
-            # else i would also need to update data file: field in the nhdr
-            outf = clean_masked_dir / fn
-            cmd = f"cp {filepath} {outf}"
-            cmds.append(cmd) if not outf.exists() else cmds.append(f"#{cmd}")
-
-    return make_cluster_command(cmds,bash_stub_dir,f"{runno}_filter_and_nrrdify")
 
 
 # TODO: this is all too baked into assumptions
@@ -450,7 +409,7 @@ def main():
     cmds = []
     for runno in args.runno_list:
         for roi_tuple in args.roi_tuple_list:
-            new_cmds = run_both_sides(runno, roi_tuple, args.biggus_diskus, args.dry_run, run_both_sides_override=args.one_side_only, skip_SAMBA_copy=True, name_tag=args.name_tag)
+            new_cmds = run_both_sides(runno, roi_tuple, args.biggus_diskus, args.dry_run, run_both_sides_override=args.one_side_only, name_tag=args.name_tag)
             # use extend instead of append, as run_both_sides* will return two cmds to run 
             cmds.extend(new_cmds)
     cluster_run_cmds(cmds, args)
