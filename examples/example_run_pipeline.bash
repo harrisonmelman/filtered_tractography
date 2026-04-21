@@ -1,0 +1,1 @@
+python $WORKSTATION_CODE/diffusion/filtered_tractography/src/prototype_pipeline.py --project_code 18.gaj.42 --runno_list N57372 N57261 /home/hmm56/Projects/24.chdi.01/list/24.chdi.01-12-WILD-M.list --roi_tuple_list "47" "101" "47,1047" --dry_run
